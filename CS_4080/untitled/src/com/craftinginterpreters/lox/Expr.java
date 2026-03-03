@@ -1,5 +1,7 @@
 package com.craftinginterpreters.lox;
 
+import java.util.List;
+
 abstract class Expr {
 
     interface Visitor<R> {
@@ -10,7 +12,12 @@ abstract class Expr {
         R visitUnaryExpr(Unary expr);
         R visitVariableExpr(Variable expr);
         R visitLogicalExpr(Logical expr);
+
+        R visitCallExpr(Call expr);
+        R visitAnonFunctionExpr(AnonFunction expr);
     }
+
+    // ---------------- Existing Nodes ----------------
 
     static class Assign extends Expr {
         final Token name;
@@ -105,6 +112,42 @@ abstract class Expr {
 
         <R> R accept(Visitor<R> visitor) {
             return visitor.visitVariableExpr(this);
+        }
+    }
+
+    // ---------------- NEW: Call ----------------
+
+    static class Call extends Expr {
+        final Expr callee;
+        final Token paren;
+        final List<Expr> arguments;
+
+        Call(Expr callee, Token paren, List<Expr> arguments) {
+            this.callee = callee;
+            this.paren = paren;
+            this.arguments = arguments;
+        }
+
+        @Override
+        <R> R accept(Visitor<R> visitor) {
+            return visitor.visitCallExpr(this);
+        }
+    }
+
+    // ---------------- NEW: Anonymous Function ----------------
+
+    static class AnonFunction extends Expr {
+        final List<Token> params;
+        final List<Stmt> body;
+
+        AnonFunction(List<Token> params, List<Stmt> body) {
+            this.params = params;
+            this.body = body;
+        }
+
+        @Override
+        <R> R accept(Visitor<R> visitor) {
+            return visitor.visitAnonFunctionExpr(this);
         }
     }
 

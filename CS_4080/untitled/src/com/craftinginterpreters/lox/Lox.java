@@ -70,6 +70,7 @@ public class Lox {
         if (!tokens.isEmpty()) {
             TokenType first = tokens.get(0).type;
             if (first == TokenType.VAR ||
+                    first == TokenType.FUN ||
                     first == TokenType.PRINT ||
                     first == TokenType.LEFT_BRACE ||
                     first == TokenType.IF ||
@@ -86,12 +87,17 @@ public class Lox {
             }
         }
 
-        // Try as expression first.
-        Parser exprParser = new Parser(tokens);
-        Expr expr = exprParser.parseExpression();
-        if (!hadError && expr != null) {
-            interpreter.interpretExpression(expr);
-            return;
+        // Try as expression first ONLY if there is no semicolon
+        boolean hasSemicolon = tokens.stream()
+                .anyMatch(t -> t.type == TokenType.SEMICOLON);
+
+        if (!hasSemicolon) {
+            Parser exprParser = new Parser(tokens);
+            Expr expr = exprParser.parseExpression();
+            if (!hadError && expr != null) {
+                interpreter.interpretExpression(expr);
+                return;
+            }
         }
 
         // Fall back to statements.

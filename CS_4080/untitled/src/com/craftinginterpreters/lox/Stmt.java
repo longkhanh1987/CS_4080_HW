@@ -12,6 +12,8 @@ abstract class Stmt {
         R visitIfStmt(If stmt);
         R visitWhileStmt(While stmt);
         R visitBreakStmt(Break stmt);
+        R visitFunctionStmt(Function stmt);
+        R visitReturnStmt(Return stmt);
     }
 
     static class Block extends Stmt {
@@ -71,6 +73,36 @@ abstract class Stmt {
     static class Break extends Stmt {
         Break() {}
         <R> R accept(Visitor<R> visitor) { return visitor.visitBreakStmt(this); }
+    }
+
+    static class Function extends Stmt {
+        final Token name;
+        final List<Token> params;
+        final List<Stmt> body;
+
+        Function(Token name, List<Token> params, List<Stmt> body) {
+            this.name = name;
+            this.params = params;
+            this.body = body;
+        }
+
+        <R> R accept(Visitor<R> visitor) {
+            return visitor.visitFunctionStmt(this);
+        }
+    }
+
+    static class Return extends Stmt {
+        final Token keyword;
+        final Expr value;
+
+        Return(Token keyword, Expr value) {
+            this.keyword = keyword;
+            this.value = value;
+        }
+
+        <R> R accept(Visitor<R> visitor) {
+            return visitor.visitReturnStmt(this);
+        }
     }
 
     abstract <R> R accept(Visitor<R> visitor);
