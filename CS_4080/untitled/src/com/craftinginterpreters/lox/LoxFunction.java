@@ -4,19 +4,33 @@ import java.util.List;
 
 class LoxFunction implements LoxCallable {
 
-    private final List<Token> params;
-    private final List<Stmt> body;
-    private final Environment closure;
+    final Stmt.Function declaration;
+    final Environment closure;
+    final boolean isInitializer;
+    final LoxClass owner;
 
-    LoxFunction(List<Token> params, List<Stmt> body, Environment closure) {
-        this.params = params;
-        this.body = body;
+    LoxFunction(Stmt.Function declaration,
+                Environment closure,
+                boolean isInitializer,
+                LoxClass owner) {
+
+        this.declaration = declaration;
         this.closure = closure;
+        this.isInitializer = isInitializer;
+        this.owner = owner;
+    }
+
+    LoxFunction bind(LoxInstance instance) {
+
+        Environment environment = new Environment(closure);
+        environment.define("this", instance);
+
+        return new LoxFunction(declaration, environment, isInitializer, owner);
     }
 
     @Override
     public int arity() {
-        return params.size();
+        return declaration.params.size();
     }
 
     @Override
@@ -24,21 +38,37 @@ class LoxFunction implements LoxCallable {
 
         Environment environment = new Environment(closure);
 
-        for (int i = 0; i < params.size(); i++) {
-            environment.define(params.get(i).lexeme, arguments.get(i));
+        for (int i = 0; i < declaration.params.size(); i++) {
+            environment.define(declaration.params.get(i).lexeme, arguments.get(i));
         }
 
+        String previousMethod = interpreter.currentMethod;
+        LoxClass previousClass = interpreter.currentClass;
+
+        interpreter.currentMethod =
+                (declaration.name == null) ? null : declaration.name.lexeme;
+        interpreter.currentClass = owner;
+
         try {
-            interpreter.executeBlock(body, environment);
+            interpreter.executeBlock(declaration.body, environment);
         } catch (Return returnValue) {
+
+            interpreter.currentMethod = previousMethod;
+            interpreter.currentClass = previousClass;
+
+            if (isInitializer) return closure.getAt(0, "this");
             return returnValue.value;
         }
 
+        interpreter.currentMethod = previousMethod;
+        interpreter.currentClass = previousClass;
+
+        if (isInitializer) return closure.getAt(0, "this");
         return null;
     }
 
-    @Override
     public String toString() {
-        return "<fn>";
+        if (declaration.name == null) return "<fn>";
+        return "<fn " + declaration.name.lexeme + ">";
     }
 }

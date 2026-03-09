@@ -15,6 +15,11 @@ abstract class Expr {
 
         R visitCallExpr(Call expr);
         R visitAnonFunctionExpr(AnonFunction expr);
+        R visitGetExpr(Get expr);
+        R visitSetExpr(Set expr);
+        R visitThisExpr(This expr);
+        R visitSuperExpr(Super expr);
+        R visitInnerExpr(Inner expr);
     }
 
     // ---------------- Existing Nodes ----------------
@@ -30,6 +35,80 @@ abstract class Expr {
 
         <R> R accept(Visitor<R> visitor) {
             return visitor.visitAssignExpr(this);
+        }
+    }
+
+    static class Inner extends Expr {
+
+        final Token keyword;
+
+        Inner(Token keyword) {
+            this.keyword = keyword;
+        }
+
+        @Override
+        <R> R accept(Visitor<R> visitor) {
+            return visitor.visitInnerExpr(this);
+        }
+    }
+
+    static class Get extends Expr {
+
+        final Expr object;
+        final Token name;
+
+        Get(Expr object, Token name){
+            this.object = object;
+            this.name = name;
+        }
+
+        <R> R accept(Visitor<R> visitor){
+            return visitor.visitGetExpr(this);
+        }
+    }
+
+    static class Set extends Expr {
+
+        final Expr object;
+        final Token name;
+        final Expr value;
+
+        Set(Expr object, Token name, Expr value){
+            this.object = object;
+            this.name = name;
+            this.value = value;
+        }
+
+        <R> R accept(Visitor<R> visitor){
+            return visitor.visitSetExpr(this);
+        }
+    }
+
+    static class This extends Expr {
+
+        final Token keyword;
+
+        This(Token keyword){
+            this.keyword = keyword;
+        }
+
+        <R> R accept(Visitor<R> visitor){
+            return visitor.visitThisExpr(this);
+        }
+    }
+
+    static class Super extends Expr {
+        final Token keyword;
+        final Token method;
+
+        Super(Token keyword, Token method) {
+            this.keyword = keyword;
+            this.method = method;
+        }
+
+        @Override
+        <R> R accept(Visitor<R> visitor) {
+            return visitor.visitSuperExpr(this);
         }
     }
 

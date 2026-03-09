@@ -14,6 +14,53 @@ abstract class Stmt {
         R visitBreakStmt(Break stmt);
         R visitFunctionStmt(Function stmt);
         R visitReturnStmt(Return stmt);
+        R visitClassStmt(Class stmt);
+        R visitSwitchStmt(Switch stmt);
+    }
+
+    static class Class extends Stmt {
+        final Token name;
+        final Expr.Variable superclass;
+        final List<Expr.Variable> mixins;
+        final List<Stmt.Function> methods;
+
+        Class(Token name,
+              Expr.Variable superclass,
+              List<Expr.Variable> mixins,
+              List<Stmt.Function> methods) {
+
+            this.name = name;
+            this.superclass = superclass;
+            this.mixins = mixins;
+            this.methods = methods;
+        }
+
+        <R> R accept(Visitor<R> visitor) {
+            return visitor.visitClassStmt(this);
+        }
+    }
+
+    static class Switch extends Stmt {
+        final Expr expression;
+        final List<Expr> cases;
+        final List<List<Stmt>> bodies;
+        final List<Stmt> defaultBranch;
+
+        Switch(Expr expression,
+               List<Expr> cases,
+               List<List<Stmt>> bodies,
+               List<Stmt> defaultBranch) {
+
+            this.expression = expression;
+            this.cases = cases;
+            this.bodies = bodies;
+            this.defaultBranch = defaultBranch;
+        }
+
+        @Override
+        <R> R accept(Visitor<R> visitor) {
+            return visitor.visitSwitchStmt(this);
+        }
     }
 
     static class Block extends Stmt {

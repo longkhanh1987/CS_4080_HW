@@ -37,6 +37,11 @@ class Scanner {
         keywords.put("var", VAR);
         keywords.put("while", WHILE);
         keywords.put("break", BREAK);
+        keywords.put("uses", USES);
+        keywords.put("inner", INNER);
+        keywords.put("switch", SWITCH);
+        keywords.put("case", CASE);
+        keywords.put("default", DEFAULT);
     }
 
     Scanner(String source) {
@@ -66,6 +71,7 @@ class Scanner {
             case '+' -> addToken(PLUS);
             case ';' -> addToken(SEMICOLON);
             case '*' -> addToken(STAR);
+            case ':' -> addToken(COLON);
 
             case '!' -> addToken(match('=') ? BANG_EQUAL : BANG);
             case '=' -> addToken(match('=') ? EQUAL_EQUAL : EQUAL);

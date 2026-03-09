@@ -15,6 +15,8 @@ class Parser {
     // for enforcing "break only inside loops"
     private int loopDepth = 0;
 
+    private int switchDepth = 0;
+
     Parser(List<Token> tokens) {
         this.tokens = tokens;
     }
@@ -48,6 +50,7 @@ class Parser {
 
     private Stmt declaration() {
         try {
+            if (match(CLASS)) return classDeclaration();
             if (match(FUN)) return functionDeclaration();
             if (match(VAR)) return varDeclaration();
             return statement();
@@ -56,6 +59,7 @@ class Parser {
             return null;
         }
     }
+
 
     private Stmt functionDeclaration() {
         Token name = consume(IDENTIFIER, "Expect function name.");
@@ -103,6 +107,7 @@ class Parser {
         if (match(RETURN)) return returnStatement();
         if (match(PRINT)) return printStatement();
         if (match(LEFT_BRACE)) return new Stmt.Block(block());
+        if (match(SWITCH)) return switchStatement();
 
         return expressionStatement();
     }
@@ -208,8 +213,8 @@ class Parser {
     }
 
     private Stmt breakStatement() {
-        if (loopDepth == 0) {
-            error(previous(), "Cannot use 'break' outside of a loop.");
+        if (loopDepth == 0 && switchDepth == 0) {
+            error(previous(), "Cannot use 'break' outside of a loop or switch.");
         }
         consume(SEMICOLON, "Expect ';' after 'break'.");
         return new Stmt.Break();
@@ -238,6 +243,113 @@ class Parser {
         return statements;
     }
 
+    private Stmt classDeclaration() {
+
+        Token name = consume(IDENTIFIER, "Expect class name.");
+
+        Expr.Variable superclass = null;
+
+        if (match(LESS)) {
+            consume(IDENTIFIER, "Expect superclass name.");
+            superclass = new Expr.Variable(previous());
+        }
+
+        List<Expr.Variable> mixins = new ArrayList<>();
+
+        if (match(USES)) {
+            do {
+                consume(IDENTIFIER, "Expect mixin name.");
+                mixins.add(new Expr.Variable(previous()));
+            } while (match(COMMA));
+        }
+
+        consume(LEFT_BRACE, "Expect '{' before class body.");
+
+        List<Stmt.Function> methods = new ArrayList<>();
+
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            methods.add(method());
+        }
+
+        consume(RIGHT_BRACE, "Expect '}' after class body.");
+
+        return new Stmt.Class(name, superclass, mixins, methods);
+    }
+
+    private Stmt.Function method() {
+
+        Token name = consume(IDENTIFIER, "Expect method name.");
+
+        List<Token> parameters = new ArrayList<>();
+
+        // allow either method() or getter
+        if (match(LEFT_PAREN)) {
+
+            if (!check(RIGHT_PAREN)) {
+                do {
+                    if (parameters.size() >= 255) {
+                        error(peek(), "Can't have more than 255 parameters.");
+                    }
+
+                    parameters.add(
+                            consume(IDENTIFIER, "Expect parameter name."));
+                } while (match(COMMA));
+            }
+
+            consume(RIGHT_PAREN, "Expect ')' after parameters.");
+        }
+
+        consume(LEFT_BRACE, "Expect '{' before method body.");
+
+        List<Stmt> body = block();
+
+        return new Stmt.Function(name, parameters, body);
+    }
+    private Stmt switchStatement() {
+
+        consume(LEFT_PAREN, "Expect '(' after switch.");
+        Expr value = expression();
+        consume(RIGHT_PAREN, "Expect ')' after switch value.");
+        consume(LEFT_BRACE, "Expect '{'.");
+
+        switchDepth++;   // START SWITCH
+
+        List<Expr> cases = new ArrayList<>();
+        List<List<Stmt>> bodies = new ArrayList<>();
+        List<Stmt> defaultBranch = null;
+
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+
+            if (match(CASE)) {
+
+                Expr caseValue = expression();
+                consume(COLON, "Expect ':' after case value.");
+
+                List<Stmt> body = new ArrayList<>();
+
+                while (!check(CASE) && !check(DEFAULT) && !check(RIGHT_BRACE)) {
+                    body.add(statement());
+                }
+                cases.add(caseValue);
+                bodies.add(body);
+
+            } else if (match(DEFAULT)) {
+
+                consume(COLON, "Expect ':' after default.");
+
+                defaultBranch = new ArrayList<>();
+
+                while (!check(RIGHT_BRACE)) {
+                    defaultBranch.add(statement());
+                }
+            }
+        }
+        consume(RIGHT_BRACE, "Expect '}' after switch.");
+        switchDepth--;   // END SWITCH
+
+        return new Stmt.Switch(value, cases, bodies, defaultBranch);
+    }
+
     // ============================================================
     // Expressions
     // ============================================================
@@ -256,6 +368,11 @@ class Parser {
             if (expr instanceof Expr.Variable) {
                 Token name = ((Expr.Variable) expr).name;
                 return new Expr.Assign(name, value);
+            }
+
+            if (expr instanceof Expr.Get) {
+                Expr.Get get = (Expr.Get) expr;
+                return new Expr.Set(get.object, get.name, value);
             }
 
             error(equals, "Invalid assignment target.");
@@ -356,7 +473,14 @@ class Parser {
         while (true) {
             if (match(LEFT_PAREN)) {
                 expr = finishCall(expr);
-            } else {
+            }
+            else if (match(DOT)) {
+                Token name = consume(IDENTIFIER,
+                        "Expect property name after '.'.");
+
+                expr = new Expr.Get(expr, name);
+            }
+            else {
                 break;
             }
         }
@@ -388,7 +512,7 @@ class Parser {
     private Expr primary() {
 
         if (check(FUN) && checkNext(LEFT_PAREN)) {
-            advance(); // consume FUN
+            advance();
             return anonymousFunction();
         }
 
@@ -400,14 +524,32 @@ class Parser {
             return new Expr.Literal(previous().literal);
         }
 
+        if (match(THIS)) {
+            return new Expr.This(previous());
+        }
+
+        if (match(SUPER)) {
+            Token keyword = previous();
+            consume(DOT, "Expect '.' after 'super'.");
+            Token method =
+                    consume(IDENTIFIER, "Expect superclass method name.");
+            return new Expr.Super(keyword, method);
+        }
+
+        if (match(INNER)) {
+            Token keyword = previous();
+            consume(LEFT_PAREN, "Expect '(' after inner.");
+            consume(RIGHT_PAREN, "Expect ')' after inner.");
+            return new Expr.Inner(keyword);
+        }
+
         if (match(IDENTIFIER)) {
             return new Expr.Variable(previous());
         }
 
         if (match(LEFT_PAREN)) {
             Expr expr = expression();
-            consume(RIGHT_PAREN,
-                    "Expect ')' after expression.");
+            consume(RIGHT_PAREN, "Expect ')' after expression.");
             return new Expr.Grouping(expr);
         }
 

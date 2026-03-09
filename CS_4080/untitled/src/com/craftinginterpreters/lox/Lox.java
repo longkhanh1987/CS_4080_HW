@@ -63,13 +63,15 @@ public class Lox {
 
     // REPL accepts expressions (print result) and statements (execute)
     private static void runReplChunk(String source) {
+        if (source.trim().isEmpty()) return;
         Scanner scanner = new Scanner(source);
         List<Token> tokens = scanner.scanTokens();
 
         // If first token starts a statement, don't try expression mode.
         if (!tokens.isEmpty()) {
             TokenType first = tokens.get(0).type;
-            if (first == TokenType.VAR ||
+            if (first == TokenType.CLASS ||
+                    first == TokenType.VAR ||
                     first == TokenType.FUN ||
                     first == TokenType.PRINT ||
                     first == TokenType.LEFT_BRACE ||
@@ -82,6 +84,11 @@ public class Lox {
                 Parser stmtParser = new Parser(tokens);
                 List<Stmt> statements = stmtParser.parse();
                 if (hadError) return;
+
+                Resolver resolver = new Resolver(interpreter);
+                resolver.resolve(statements);
+                if (hadError) return;
+
                 interpreter.interpret(statements);
                 return;
             }
@@ -105,6 +112,11 @@ public class Lox {
         Parser stmtParser = new Parser(tokens);
         List<Stmt> statements = stmtParser.parse();
         if (hadError) return;
+
+        Resolver resolver = new Resolver(interpreter);
+        resolver.resolve(statements);
+        if (hadError) return;
+
         interpreter.interpret(statements);
     }
 
@@ -116,6 +128,12 @@ public class Lox {
         List<Stmt> statements = parser.parse();
 
         if (hadError) return;
+
+        Resolver resolver = new Resolver(interpreter);
+        resolver.resolve(statements);
+
+        if (hadError) return;
+
         interpreter.interpret(statements);
     }
 
