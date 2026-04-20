@@ -6,6 +6,11 @@
 #include "value.h"
 
 typedef struct {
+  ObjString* name;
+  Value value;
+} Global;
+
+typedef struct {
   Chunk* chunk;
   uint8_t* ip;
 
@@ -14,6 +19,9 @@ typedef struct {
   int stackCapacity;
 
   Obj* objects;
+
+  Global globals[256];
+  int globalCount;
 } VM;
 
 typedef enum {
@@ -27,7 +35,6 @@ extern VM vm;
 void initVM(void);
 void freeVM(void);
 InterpretResult interpret(Chunk* chunk);
-
 void push(Value value);
 Value pop(void);
 

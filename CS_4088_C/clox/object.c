@@ -17,16 +17,10 @@ static Obj* allocateObject(size_t size, ObjType type) {
   return object;
 }
 
-static ObjString* allocateString(const char* chars, int length) {
-  ObjString* string = (ObjString*)reallocate(
-      NULL, 0, sizeof(ObjString) + length + 1);
-
-  string->obj.type = OBJ_STRING;
+static ObjString* allocateString(char* chars, int length) {
+  ObjString* string = ALLOCATE_OBJ(ObjString, OBJ_STRING);
   string->length = length;
-
-  memcpy(string->chars, chars, length);
-  string->chars[length] = '\0';
-
+  string->chars = chars;
   return string;
 }
 

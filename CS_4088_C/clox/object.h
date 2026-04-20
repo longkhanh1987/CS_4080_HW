@@ -16,19 +16,18 @@ struct Obj {
 typedef struct ObjString {
   Obj obj;
   int length;
-  bool ownsChars;   
-  char* chars;      
+  char* chars;
 } ObjString;
 
-#define OBJ_TYPE(value)        (AS_OBJ(value)->type)
+#define OBJ_TYPE(value) (AS_OBJ(value)->type)
 
 static inline bool isObjType(Value value, ObjType type) {
   return IS_OBJ(value) && AS_OBJ(value)->type == type;
 }
 
-#define IS_STRING(value)       isObjType(value, OBJ_STRING)
-#define AS_STRING(value)       ((ObjString*)AS_OBJ(value))
-#define AS_CSTRING(value)      (((ObjString*)AS_OBJ(value))->chars)
+#define IS_STRING(value)  isObjType(value, OBJ_STRING)
+#define AS_STRING(value)  ((ObjString*)AS_OBJ(value))
+#define AS_CSTRING(value) (((ObjString*)AS_OBJ(value))->chars)
 
 ObjString* copyString(const char* chars, int length);
 ObjString* takeString(char* chars, int length);

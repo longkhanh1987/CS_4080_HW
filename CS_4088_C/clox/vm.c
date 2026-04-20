@@ -14,10 +14,42 @@ static void resetStack(void) {
   vm.stackTop = vm.stack;
 }
 
+static bool valuesEqual(Value a, Value b) {
+  if (a.type != b.type) return false;
+  switch (a.type) {
+    case VAL_BOOL: return AS_BOOL(a) == AS_BOOL(b);
+    case VAL_NIL: return true;
+    case VAL_NUMBER: return AS_NUMBER(a) == AS_NUMBER(b);
+    case VAL_OBJ:
+      if (IS_STRING(a) && IS_STRING(b)) {
+        ObjString* sa = AS_STRING(a);
+        ObjString* sb = AS_STRING(b);
+        return sa->length == sb->length && memcmp(sa->chars, sb->chars, sa->length) == 0;
+      }
+      return AS_OBJ(a) == AS_OBJ(b);
+  }
+  return false;
+}
+
+static bool isFalsey(Value value) {
+  return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value));
+}
+
+static int findGlobal(ObjString* name) {
+  for (int i = 0; i < vm.globalCount; i++) {
+    if (vm.globals[i].name->length == name->length &&
+        memcmp(vm.globals[i].name->chars, name->chars, name->length) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 void initVM(void) {
   vm.stackCapacity = 8;
   vm.stack = (Value*)malloc(sizeof(Value) * vm.stackCapacity);
   vm.objects = NULL;
+  vm.globalCount = 0;
   resetStack();
 }
 
@@ -28,13 +60,11 @@ void freeVM(void) {
 
 void push(Value value) {
   int count = (int)(vm.stackTop - vm.stack);
-
   if (count >= vm.stackCapacity) {
     vm.stackCapacity *= 2;
     vm.stack = (Value*)realloc(vm.stack, sizeof(Value) * vm.stackCapacity);
     vm.stackTop = vm.stack + count;
   }
-
   *vm.stackTop = value;
   vm.stackTop++;
 }
@@ -55,26 +85,28 @@ static void runtimeError(const char* message) {
 static void concatenate(void) {
   ObjString* b = AS_STRING(pop());
   ObjString* a = AS_STRING(pop());
-
   int length = a->length + b->length;
   char* chars = ALLOCATE(char, length + 1);
-
   memcpy(chars, a->chars, a->length);
   memcpy(chars + a->length, b->chars, b->length);
   chars[length] = '\0';
-
-  ObjString* result = takeString(chars, length);
-  push(OBJ_VAL(result));
+  push(OBJ_VAL(takeString(chars, length)));
 }
 
 static InterpretResult run(void) {
 #define READ_BYTE() (*vm.ip++)
+#define READ_SHORT() \
+  (vm.ip += 2, (uint16_t)((vm.ip[-2] << 8) | vm.ip[-1]))
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
 #define READ_CONSTANT_LONG() \
-  (vm.chunk->constants.values[ \
-    READ_BYTE() | (READ_BYTE() << 8) | (READ_BYTE() << 16)])
+  ({ \
+    uint32_t b1 = READ_BYTE(); \
+    uint32_t b2 = READ_BYTE(); \
+    uint32_t b3 = READ_BYTE(); \
+    vm.chunk->constants.values[b1 | (b2 << 8) | (b3 << 16)]; \
+  })
 
-#define BINARY_OP(op) \
+#define BINARY_OP(valueType, op) \
   do { \
     if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
       runtimeError("Operands must be numbers."); \
@@ -82,37 +114,72 @@ static InterpretResult run(void) {
     } \
     double b = AS_NUMBER(pop()); \
     double a = AS_NUMBER(pop()); \
-    push(NUMBER_VAL(a op b)); \
+    push(valueType(a op b)); \
   } while (false)
 
   for (;;) {
-#ifdef DEBUG_TRACE_EXECUTION
-    printf("          ");
-    for (Value* slot = vm.stack; slot < vm.stackTop; slot++) {
-      printf("[ ");
-      printValue(*slot);
-      printf(" ]");
-    }
-    printf("\n");
-    disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
-#endif
-
-    uint8_t instruction;
-
-    switch (instruction = READ_BYTE()) {
-      case OP_CONSTANT: {
-        Value constant = READ_CONSTANT();
-        push(constant);
+    uint8_t instruction = READ_BYTE();
+    switch (instruction) {
+      case OP_CONSTANT: push(READ_CONSTANT()); break;
+      case OP_CONSTANT_LONG: push(READ_CONSTANT_LONG()); break;
+      case OP_NIL: push(NIL_VAL); break;
+      case OP_TRUE: push(BOOL_VAL(true)); break;
+      case OP_FALSE: push(BOOL_VAL(false)); break;
+      case OP_POP: pop(); break;
+      case OP_GET_LOCAL: {
+        uint8_t slot = READ_BYTE();
+        push(vm.stack[slot]);
         break;
       }
-
-      case OP_CONSTANT_LONG: {
-        Value constant = READ_CONSTANT_LONG();
-        push(constant);
+      case OP_SET_LOCAL: {
+        uint8_t slot = READ_BYTE();
+        vm.stack[slot] = peek(0);
         break;
       }
-
-      case OP_ADD: {
+      case OP_GET_GLOBAL: {
+        ObjString* name = AS_STRING(READ_CONSTANT());
+        int slot = findGlobal(name);
+        if (slot == -1) {
+          runtimeError("Undefined variable.");
+          return INTERPRET_RUNTIME_ERROR;
+        }
+        push(vm.globals[slot].value);
+        break;
+      }
+      case OP_DEFINE_GLOBAL: {
+        ObjString* name = AS_STRING(READ_CONSTANT());
+        int slot = findGlobal(name);
+        if (slot == -1) {
+          if (vm.globalCount >= 256) {
+            runtimeError("Too many global variables.");
+            return INTERPRET_RUNTIME_ERROR;
+          }
+          slot = vm.globalCount++;
+          vm.globals[slot].name = name;
+        }
+        vm.globals[slot].value = peek(0);
+        pop();
+        break;
+      }
+      case OP_SET_GLOBAL: {
+        ObjString* name = AS_STRING(READ_CONSTANT());
+        int slot = findGlobal(name);
+        if (slot == -1) {
+          runtimeError("Undefined variable.");
+          return INTERPRET_RUNTIME_ERROR;
+        }
+        vm.globals[slot].value = peek(0);
+        break;
+      }
+      case OP_EQUAL: {
+        Value b = pop();
+        Value a = pop();
+        push(BOOL_VAL(valuesEqual(a, b)));
+        break;
+      }
+      case OP_GREATER: BINARY_OP(BOOL_VAL, >); break;
+      case OP_LESS: BINARY_OP(BOOL_VAL, <); break;
+      case OP_ADD:
         if (IS_STRING(peek(0)) && IS_STRING(peek(1))) {
           concatenate();
         } else if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {
@@ -124,20 +191,10 @@ static InterpretResult run(void) {
           return INTERPRET_RUNTIME_ERROR;
         }
         break;
-      }
-
-      case OP_SUBTRACT:
-        BINARY_OP(-);
-        break;
-
-      case OP_MULTIPLY:
-        BINARY_OP(*);
-        break;
-
-      case OP_DIVIDE:
-        BINARY_OP(/);
-        break;
-
+      case OP_SUBTRACT: BINARY_OP(NUMBER_VAL, -); break;
+      case OP_MULTIPLY: BINARY_OP(NUMBER_VAL, *); break;
+      case OP_DIVIDE: BINARY_OP(NUMBER_VAL, /); break;
+      case OP_NOT: push(BOOL_VAL(isFalsey(pop()))); break;
       case OP_NEGATE:
         if (!IS_NUMBER(peek(0))) {
           runtimeError("Operand must be a number.");
@@ -145,16 +202,36 @@ static InterpretResult run(void) {
         }
         vm.stackTop[-1].as.number = -vm.stackTop[-1].as.number;
         break;
-
-      case OP_RETURN: {
+      case OP_PRINT:
         printValue(pop());
         printf("\n");
-        return INTERPRET_OK;
+        break;
+      case OP_JUMP: {
+        uint16_t offset = READ_SHORT();
+        vm.ip += offset;
+        break;
       }
+      case OP_JUMP_IF_FALSE: {
+        uint16_t offset = READ_SHORT();
+        if (isFalsey(peek(0))) vm.ip += offset;
+        break;
+      }
+      case OP_LOOP: {
+        uint16_t offset = READ_SHORT();
+        vm.ip -= offset;
+        break;
+      }
+      case OP_RETURN:
+        if (vm.stackTop > vm.stack) {
+          printValue(pop());
+          printf("\n");
+        }
+        return INTERPRET_OK;
     }
   }
 
 #undef READ_BYTE
+#undef READ_SHORT
 #undef READ_CONSTANT
 #undef READ_CONSTANT_LONG
 #undef BINARY_OP
