@@ -11,6 +11,8 @@
 
 VM vm;
 
+static bool typeNative(int argCount, Value* args, Value* result);
+
 static void resetStack(void) {
   vm.stackTop = vm.stack;
 }
@@ -66,6 +68,14 @@ void initVM(void) {
   vm.objects = NULL;
   vm.globalCount = 0;
   resetStack();
+
+  ObjString* name = copyString("type", 4);
+
+  vm.globals[vm.globalCount].name = name;
+  vm.globals[vm.globalCount].value =
+      OBJ_VAL(newNative(typeNative, 1));
+
+  vm.globalCount++;
 }
 
 void freeVM(void) {
@@ -117,11 +127,6 @@ static void concatenate(void) {
   push(OBJ_VAL(takeString(chars, length)));
 }
 
-/*
-  Chapter 24 Challenge 3:
-  Native functions return bool for success/failure and store
-  the actual result through a Value* result pointer.
-*/
 static bool callNative(ObjNative* native, int argCount) {
   if (argCount != native->arity) {
     runtimeError("Expected %d arguments but got %d.",
@@ -140,10 +145,6 @@ static bool callNative(ObjNative* native, int argCount) {
   return true;
 }
 
-/*
-  Example native function for Chapter 24 Challenge 4.
-  This returns the type of a value as a string.
-*/
 static bool typeNative(int argCount, Value* args, Value* result) {
   if (argCount != 1) {
     runtimeError("type() expects 1 argument.");
@@ -167,13 +168,6 @@ static bool typeNative(int argCount, Value* args, Value* result) {
   return true;
 }
 
-/*
-  Chapter 25 Challenge 1:
-  Proposed call support for both raw ObjFunction and ObjClosure.
-
-  In a full Chapter 24/25 VM, these would create CallFrames.
-  Your current VM does not have CallFrame yet, so these are placeholders.
-*/
 static bool callFunction(ObjFunction* function, int argCount) {
   if (argCount != function->arity) {
     runtimeError("Expected %d arguments but got %d.",
@@ -319,11 +313,6 @@ static InterpretResult run(void) {
         int argCount = READ_BYTE();
         Value callee = peek(argCount);
 
-        /*
-          Chapter 25 Challenge 1:
-          Support both raw functions and closures.
-          Native functions still work from Chapter 24.
-        */
         if (IS_FUNCTION(callee)) {
           if (!callFunction(AS_FUNCTION(callee), argCount)) {
             vm.ip = ip;
