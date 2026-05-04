@@ -4,20 +4,24 @@
 #include "common.h"
 #include "value.h"
 #include "chunk.h"
+#include "table.h"
 
 typedef enum {
   OBJ_CLOSURE,
   OBJ_FUNCTION,
   OBJ_NATIVE,
   OBJ_STRING,
+  OBJ_CLASS,
+  OBJ_INSTANCE,
 } ObjType;
 
 struct Obj {
   ObjType type;
+  bool isMarked;
+  int refCount;
   struct Obj* next;
 };
 
-/* Challenge 3: native function returns bool and stores result by pointer */
 typedef bool (*NativeFn)(int argCount, Value* args, Value* result);
 
 typedef struct {
@@ -30,6 +34,7 @@ typedef struct ObjString {
   Obj obj;
   int length;
   char* chars;
+  uint32_t hash;
 } ObjString;
 
 typedef struct {
@@ -45,7 +50,24 @@ typedef struct {
   ObjFunction* function;
 } ObjClosure;
 
+typedef struct {
+  Obj obj;
+  ObjString* name;
+} ObjClass;
+
+typedef struct {
+  Obj obj;
+  ObjClass* klass;
+  Table fields;
+} ObjInstance;
+
 #define OBJ_TYPE(value) (AS_OBJ(value)->type)
+#define IS_CLASS(value)    isObjType(value, OBJ_CLASS)
+#define IS_INSTANCE(value) isObjType(value, OBJ_INSTANCE)
+
+#define AS_CLASS(value)    ((ObjClass*)AS_OBJ(value))
+#define AS_INSTANCE(value) ((ObjInstance*)AS_OBJ(value))
+
 
 static inline bool isObjType(Value value, ObjType type) {
   return IS_OBJ(value) && AS_OBJ(value)->type == type;

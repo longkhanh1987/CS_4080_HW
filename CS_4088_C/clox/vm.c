@@ -12,10 +12,18 @@
 VM vm;
 
 static bool typeNative(int argCount, Value* args, Value* result);
+static bool getFieldNative(int argCount, Value* args, Value* result);
+static bool deleteFieldNative(int argCount, Value* args, Value* result);
 
 static void resetStack(void) {
   vm.stackTop = vm.stack;
 }
+
+typedef struct {
+  ObjClass* klass;
+  ObjString* name;
+  int fieldIndex;
+} InlineCache;
 
 static bool valuesEqual(Value a, Value b) {
   if (a.type != b.type) return false;
@@ -62,20 +70,23 @@ static int findGlobal(ObjString* name) {
   return -1;
 }
 
+static void defineNative(const char* name, int length,
+                         NativeFn function, int arity) {
+  vm.globals[vm.globalCount].name = copyString(name, length);
+  vm.globals[vm.globalCount].value = OBJ_VAL(newNative(function, arity));
+  vm.globalCount++;
+}
+
 void initVM(void) {
   vm.stackCapacity = 8;
   vm.stack = (Value*)malloc(sizeof(Value) * vm.stackCapacity);
+
   vm.objects = NULL;
   vm.globalCount = 0;
+
   resetStack();
 
-  ObjString* name = copyString("type", 4);
-
-  vm.globals[vm.globalCount].name = name;
-  vm.globals[vm.globalCount].value =
-      OBJ_VAL(newNative(typeNative, 1));
-
-  vm.globalCount++;
+  defineNative("type", 4, typeNative, 1);
 }
 
 void freeVM(void) {
@@ -110,6 +121,7 @@ static void runtimeError(const char* format, ...) {
   va_start(args, format);
   vfprintf(stderr, format, args);
   va_end(args);
+
   fprintf(stderr, "\n");
 }
 
@@ -135,6 +147,7 @@ static bool callNative(ObjNative* native, int argCount) {
   }
 
   Value result;
+
   if (!native->function(argCount, vm.stackTop - argCount, &result)) {
     return false;
   }
@@ -142,6 +155,36 @@ static bool callNative(ObjNative* native, int argCount) {
   vm.stackTop -= argCount + 1;
   push(result);
 
+  return true;
+}
+
+static bool getFieldNative(int argCount, Value* args, Value* result) {
+  if (argCount != 2 || !IS_INSTANCE(args[0]) || !IS_STRING(args[1])) {
+    runtimeError("getField(instance, name) expects an instance and string.");
+    return false;
+  }
+
+  ObjInstance* instance = AS_INSTANCE(args[0]);
+  ObjString* name = AS_STRING(args[1]);
+
+  if (tableGet(&instance->fields, name, result)) {
+    return true;
+  }
+
+  *result = NIL_VAL;
+  return true;
+}
+
+static bool deleteFieldNative(int argCount, Value* args, Value* result) {
+  if (argCount != 2 || !IS_INSTANCE(args[0]) || !IS_STRING(args[1])) {
+    runtimeError("deleteField(instance, name) expects an instance and string.");
+    return false;
+  }
+
+  ObjInstance* instance = AS_INSTANCE(args[0]);
+  ObjString* name = AS_STRING(args[1]);
+
+  *result = BOOL_VAL(tableDelete(&instance->fields, name));
   return true;
 }
 
@@ -161,6 +204,12 @@ static bool typeNative(int argCount, Value* args, Value* result) {
     *result = OBJ_VAL(copyString("nil", 3));
   } else if (IS_STRING(value)) {
     *result = OBJ_VAL(copyString("string", 6));
+  } else if (IS_FUNCTION(value)) {
+    *result = OBJ_VAL(copyString("function", 8));
+  } else if (IS_CLOSURE(value)) {
+    *result = OBJ_VAL(copyString("closure", 7));
+  } else if (IS_NATIVE(value)) {
+    *result = OBJ_VAL(copyString("native", 6));
   } else {
     *result = OBJ_VAL(copyString("unknown", 7));
   }
@@ -333,10 +382,32 @@ static InterpretResult run(void) {
 
         } else {
           vm.ip = ip;
-          runtimeError("Can only call functions and closures.");
+          runtimeError("Can only call functions.");
           return INTERPRET_RUNTIME_ERROR;
         }
 
+        break;
+      }
+      case OP_GET_PROPERTY: {
+        if (!IS_INSTANCE(peek(0))) {
+          vm.ip = ip;
+          runtimeError("Only instances have properties.");
+          return INTERPRET_RUNTIME_ERROR;
+        }
+
+        ObjInstance* instance = AS_INSTANCE(peek(0));
+        ObjString* name = READ_STRING();
+
+        Value value;
+        if (tableGet(&instance->fields, name, &value)) {
+          pop();
+          push(value);
+          break;
+        }
+
+        // 👇 THIS IS YOUR CHANGE (return nil instead of crash)
+        pop();
+        push(NIL_VAL);
         break;
       }
 
@@ -358,10 +429,12 @@ static InterpretResult run(void) {
       case OP_ADD:
         if (IS_STRING(peek(0)) && IS_STRING(peek(1))) {
           concatenate();
+
         } else if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {
           double b = AS_NUMBER(pop());
           double a = AS_NUMBER(pop());
           push(NUMBER_VAL(a + b));
+
         } else {
           vm.ip = ip;
           runtimeError("Operands must be two numbers or two strings.");
@@ -431,6 +504,11 @@ static InterpretResult run(void) {
         }
 
         return INTERPRET_OK;
+
+      default:
+        vm.ip = ip;
+        runtimeError("Unknown opcode.");
+        return INTERPRET_RUNTIME_ERROR;
     }
   }
 
@@ -444,5 +522,6 @@ static InterpretResult run(void) {
 InterpretResult interpret(Chunk* chunk) {
   vm.chunk = chunk;
   vm.ip = vm.chunk->code;
+
   return run();
 }
