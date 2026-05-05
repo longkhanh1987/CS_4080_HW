@@ -53,6 +53,8 @@ typedef struct {
 typedef struct {
   Obj obj;
   ObjString* name;
+  Table methods;
+  ObjClosure* initializer;
 } ObjClass;
 
 typedef struct {
@@ -60,6 +62,31 @@ typedef struct {
   ObjClass* klass;
   Table fields;
 } ObjInstance;
+
+typedef struct {
+  ObjClass* cachedClass;
+  ObjString* cachedName;
+  ObjClosure* cachedMethod;
+} InlineCache;
+
+typedef struct {
+  ObjString* fieldName;
+  ObjClass* owner;
+} FieldOwner;
+
+typedef struct {
+  ObjClass* klass;
+  ObjString* methodName;
+  ObjClosure* method;
+  int classVersion;
+} MethodCache;
+
+typedef struct {
+  Obj obj;
+  ObjString* name;
+  Table methods;
+  int version;
+} ObjClass;
 
 #define OBJ_TYPE(value) (AS_OBJ(value)->type)
 #define IS_CLASS(value)    isObjType(value, OBJ_CLASS)
@@ -91,6 +118,10 @@ ObjNative* newNative(NativeFn function, int arity);
 
 ObjString* copyString(const char* chars, int length);
 ObjString* takeString(char* chars, int length);
+
+ObjClass* newClass(ObjString* name);
+ObjInstance* newInstance(ObjClass* klass);
+
 void printObject(Value value);
 
 #endif

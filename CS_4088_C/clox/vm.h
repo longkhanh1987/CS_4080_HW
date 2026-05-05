@@ -20,6 +20,8 @@ typedef struct {
 
   Obj* objects;
 
+  ObjString* initString;
+
   Global globals[256];
   int globalCount;
 } VM;

@@ -78,6 +78,35 @@ static uint32_t hashString(const char* key, int length) {
   return hash;
 }
 
+ObjString* takeString(char* chars, int length) {
+  uint32_t hash = hashString(chars, length);
+  return allocateString(chars, length, hash);
+}
+
+ObjString* copyString(const char* chars, int length) {
+  char* heapChars = ALLOCATE(char, length + 1);
+  memcpy(heapChars, chars, length);
+  heapChars[length] = '\0';
+
+  uint32_t hash = hashString(heapChars, length);
+  return allocateString(heapChars, length, hash);
+}
+
+ObjClass* newClass(ObjString* name) {
+  ObjClass* klass = ALLOCATE_OBJ(ObjClass, OBJ_CLASS);
+  klass->name = name;
+  klass->initializer = NULL;
+  initTable(&klass->methods);
+  return klass;
+}
+
+ObjInstance* newInstance(ObjClass* klass) {
+  ObjInstance* instance = ALLOCATE_OBJ(ObjInstance, OBJ_INSTANCE);
+  instance->klass = klass;
+  initTable(&instance->fields);
+  return instance;
+}
+
 void printObject(Value value) {
   switch (OBJ_TYPE(value)) {
     case OBJ_CLOSURE:

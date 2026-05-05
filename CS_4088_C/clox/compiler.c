@@ -51,6 +51,10 @@ typedef struct {
 Parser parser;
 Compiler* current = NULL;
 static Chunk* compilingChunk;
+static void classDeclaration(void);
+static void method(void);
+static void dot(bool canAssign);
+static void this_(bool canAssign);
 
 static Chunk* currentChunk(void) { return compilingChunk; }
 
@@ -478,6 +482,8 @@ ParseRule rules[] = {
   [TOKEN_WHILE]         = {NULL,     NULL,   PREC_NONE},
   [TOKEN_ERROR]         = {NULL,     NULL,   PREC_NONE},
   [TOKEN_EOF]           = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_DOT]  = {NULL, dot, PREC_CALL},
+  [TOKEN_THIS] = {this_, NULL, PREC_NONE},
 };
 
 static ParseRule* getRule(TokenType type) {
@@ -749,6 +755,14 @@ static void declaration(void) {
 
   if (parser.panicMode) {
     synchronize();
+  }
+  
+  if (match(TOKEN_CLASS)) {
+    classDeclaration();
+  } else if (match(TOKEN_VAR)) {
+    varDeclaration();
+  } else {
+    statement();
   }
 }
 

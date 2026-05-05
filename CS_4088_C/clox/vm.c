@@ -19,34 +19,41 @@ static void resetStack(void) {
   vm.stackTop = vm.stack;
 }
 
-typedef struct {
-  ObjClass* klass;
-  ObjString* name;
-  int fieldIndex;
-} InlineCache;
+static Value peek(int distance) {
+  return vm.stackTop[-1 - distance];
+}
 
+static void runtimeError(const char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  vfprintf(stderr, format, args);
+  va_end(args);
+  fprintf(stderr, "\n");
+}
+static bool innerCall(ObjClass* currentClass,
+                      ObjClass* receiverClass,
+                      ObjString* methodName,
+                      int argCount) {
+  // Search downward from currentClass toward receiverClass.
+  // If a subclass method with the same name exists, call it.
+  // If no method exists, inner does nothing.
+  return true;
+}
 static bool valuesEqual(Value a, Value b) {
   if (a.type != b.type) return false;
 
   switch (a.type) {
-    case VAL_BOOL:
-      return AS_BOOL(a) == AS_BOOL(b);
-
-    case VAL_NIL:
-      return true;
-
-    case VAL_NUMBER:
-      return AS_NUMBER(a) == AS_NUMBER(b);
+    case VAL_BOOL: return AS_BOOL(a) == AS_BOOL(b);
+    case VAL_NIL: return true;
+    case VAL_NUMBER: return AS_NUMBER(a) == AS_NUMBER(b);
 
     case VAL_OBJ:
       if (IS_STRING(a) && IS_STRING(b)) {
         ObjString* sa = AS_STRING(a);
         ObjString* sb = AS_STRING(b);
-
         return sa->length == sb->length &&
                memcmp(sa->chars, sb->chars, sa->length) == 0;
       }
-
       return AS_OBJ(a) == AS_OBJ(b);
   }
 
@@ -60,9 +67,7 @@ static bool isFalsey(Value value) {
 static int findGlobal(ObjString* name) {
   for (int i = 0; i < vm.globalCount; i++) {
     if (vm.globals[i].name->length == name->length &&
-        memcmp(vm.globals[i].name->chars,
-               name->chars,
-               name->length) == 0) {
+        memcmp(vm.globals[i].name->chars, name->chars, name->length) == 0) {
       return i;
     }
   }
@@ -86,11 +91,17 @@ void initVM(void) {
 
   resetStack();
 
+  vm.initString = NULL;
+  vm.initString = copyString("init", 4);
+
   defineNative("type", 4, typeNative, 1);
+  defineNative("getField", 8, getFieldNative, 2);
+  defineNative("deleteField", 11, deleteFieldNative, 2);
 }
 
 void freeVM(void) {
   free(vm.stack);
+  vm.initString = NULL;
   freeObjects();
 }
 
@@ -110,19 +121,6 @@ void push(Value value) {
 Value pop(void) {
   vm.stackTop--;
   return *vm.stackTop;
-}
-
-static Value peek(int distance) {
-  return vm.stackTop[-1 - distance];
-}
-
-static void runtimeError(const char* format, ...) {
-  va_list args;
-  va_start(args, format);
-  vfprintf(stderr, format, args);
-  va_end(args);
-
-  fprintf(stderr, "\n");
 }
 
 static void concatenate(void) {
@@ -158,6 +156,117 @@ static bool callNative(ObjNative* native, int argCount) {
   return true;
 }
 
+static bool callFunction(ObjFunction* function, int argCount) {
+  if (argCount != function->arity) {
+    runtimeError("Expected %d arguments but got %d.",
+                 function->arity, argCount);
+    return false;
+  }
+
+  runtimeError("Function call not fully implemented yet.");
+  return false;
+}
+
+static bool callClosure(ObjClosure* closure, int argCount) {
+  if (argCount != closure->function->arity) {
+    runtimeError("Expected %d arguments but got %d.",
+                 closure->function->arity, argCount);
+    return false;
+  }
+
+  runtimeError("Closure call not fully implemented yet.");
+  return false;
+}
+
+static bool callValue(Value callee, int argCount) {
+  if (IS_INSTANCE(callee)) {
+    ObjInstance* instance = AS_INSTANCE(callee);
+
+    ObjString* name = AS_STRING(peek(argCount));
+
+    Value value;
+    if (tableGet(&instance->fields, name, &value)) {
+      vm.stackTop[-argCount - 1] = value;
+      return callValue(value, argCount);
+    }
+
+    runtimeError("Undefined property.");
+    return false;
+  }
+
+  if (IS_CLASS(callee)) {
+    ObjClass* klass = AS_CLASS(callee);
+    vm.stackTop[-argCount - 1] = OBJ_VAL(newInstance(klass));
+
+    if (klass->initializer != NULL) {
+      return callClosure(klass->initializer, argCount);
+    } else if (argCount != 0) {
+      runtimeError("Expected 0 arguments but got %d.", argCount);
+      return false;
+    }
+
+    return true;
+
+  } else if (IS_FUNCTION(callee)) {
+    return callFunction(AS_FUNCTION(callee), argCount);
+
+  } else if (IS_CLOSURE(callee)) {
+    return callClosure(AS_CLOSURE(callee), argCount);
+
+  } else if (IS_NATIVE(callee)) {
+    return callNative(AS_NATIVE_OBJ(callee), argCount);
+  }
+
+  runtimeError("Can only call functions and classes.");
+  return false;
+}
+
+static void defineMethod(ObjString* name) {
+  Value method = peek(0);
+  ObjClass* klass = AS_CLASS(peek(1));
+
+  tableSet(&klass->methods, name, method);
+
+  if (name == vm.initString) {
+    klass->initializer = AS_CLOSURE(method);
+  }
+
+  pop();
+}
+
+static bool typeNative(int argCount, Value* args, Value* result) {
+  if (argCount != 1) {
+    runtimeError("type() expects 1 argument.");
+    return false;
+  }
+
+  Value value = args[0];
+
+  if (IS_NUMBER(value)) {
+    *result = OBJ_VAL(copyString("number", 6));
+  } else if (IS_BOOL(value)) {
+    *result = OBJ_VAL(copyString("bool", 4));
+  } else if (IS_NIL(value)) {
+    *result = OBJ_VAL(copyString("nil", 3));
+  } else if (IS_STRING(value)) {
+    *result = OBJ_VAL(copyString("string", 6));
+  } else if (IS_CLASS(value)) {
+    *result = OBJ_VAL(copyString("class", 5));
+  } else if (IS_INSTANCE(value)) {
+    *result = OBJ_VAL(copyString("instance", 8));
+  } else if (IS_FUNCTION(value)) {
+    *result = OBJ_VAL(copyString("function", 8));
+  } else if (IS_CLOSURE(value)) {
+    *result = OBJ_VAL(copyString("closure", 7));
+  } else if (IS_NATIVE(value)) {
+    *result = OBJ_VAL(copyString("native", 6));
+  } else {
+    *result = OBJ_VAL(copyString("unknown", 7));
+  }
+
+  return true;
+}
+
 static bool getFieldNative(int argCount, Value* args, Value* result) {
   if (argCount != 2 || !IS_INSTANCE(args[0]) || !IS_STRING(args[1])) {
     runtimeError("getField(instance, name) expects an instance and string.");
@@ -188,68 +297,15 @@ static bool deleteFieldNative(int argCount, Value* args, Value* result) {
   return true;
 }
 
-static bool typeNative(int argCount, Value* args, Value* result) {
-  if (argCount != 1) {
-    runtimeError("type() expects 1 argument.");
-    return false;
-  }
-
-  Value value = args[0];
-
-  if (IS_NUMBER(value)) {
-    *result = OBJ_VAL(copyString("number", 6));
-  } else if (IS_BOOL(value)) {
-    *result = OBJ_VAL(copyString("bool", 4));
-  } else if (IS_NIL(value)) {
-    *result = OBJ_VAL(copyString("nil", 3));
-  } else if (IS_STRING(value)) {
-    *result = OBJ_VAL(copyString("string", 6));
-  } else if (IS_FUNCTION(value)) {
-    *result = OBJ_VAL(copyString("function", 8));
-  } else if (IS_CLOSURE(value)) {
-    *result = OBJ_VAL(copyString("closure", 7));
-  } else if (IS_NATIVE(value)) {
-    *result = OBJ_VAL(copyString("native", 6));
-  } else {
-    *result = OBJ_VAL(copyString("unknown", 7));
-  }
-
-  return true;
-}
-
-static bool callFunction(ObjFunction* function, int argCount) {
-  if (argCount != function->arity) {
-    runtimeError("Expected %d arguments but got %d.",
-                 function->arity, argCount);
-    return false;
-  }
-
-  runtimeError("Function call not fully implemented yet.");
-  return false;
-}
-
-static bool callClosure(ObjClosure* closure, int argCount) {
-  if (argCount != closure->function->arity) {
-    runtimeError("Expected %d arguments but got %d.",
-                 closure->function->arity, argCount);
-    return false;
-  }
-
-  runtimeError("Closure call not fully implemented yet.");
-  return false;
-}
-
 static InterpretResult run(void) {
   register uint8_t* ip = vm.ip;
 
 #define READ_BYTE() (*ip++)
-
 #define READ_SHORT() \
   (ip += 2, (uint16_t)((ip[-2] << 8) | ip[-1]))
-
 #define READ_CONSTANT() \
   (vm.chunk->constants.values[READ_BYTE()])
-
+#define READ_STRING() AS_STRING(READ_CONSTANT())
 #define READ_CONSTANT_LONG() \
   ({ \
     uint32_t b1 = READ_BYTE(); \
@@ -362,32 +418,18 @@ static InterpretResult run(void) {
         int argCount = READ_BYTE();
         Value callee = peek(argCount);
 
-        if (IS_FUNCTION(callee)) {
-          if (!callFunction(AS_FUNCTION(callee), argCount)) {
-            vm.ip = ip;
-            return INTERPRET_RUNTIME_ERROR;
-          }
-
-        } else if (IS_CLOSURE(callee)) {
-          if (!callClosure(AS_CLOSURE(callee), argCount)) {
-            vm.ip = ip;
-            return INTERPRET_RUNTIME_ERROR;
-          }
-
-        } else if (IS_NATIVE(callee)) {
-          if (!callNative(AS_NATIVE_OBJ(callee), argCount)) {
-            vm.ip = ip;
-            return INTERPRET_RUNTIME_ERROR;
-          }
-
-        } else {
+        if (!callValue(callee, argCount)) {
           vm.ip = ip;
-          runtimeError("Can only call functions.");
           return INTERPRET_RUNTIME_ERROR;
         }
 
         break;
       }
+
+      case OP_CLASS:
+        push(OBJ_VAL(newClass(READ_STRING())));
+        break;
+
       case OP_GET_PROPERTY: {
         if (!IS_INSTANCE(peek(0))) {
           vm.ip = ip;
@@ -405,11 +447,30 @@ static InterpretResult run(void) {
           break;
         }
 
-        // 👇 THIS IS YOUR CHANGE (return nil instead of crash)
         pop();
         push(NIL_VAL);
         break;
       }
+
+      case OP_SET_PROPERTY: {
+        if (!IS_INSTANCE(peek(1))) {
+          vm.ip = ip;
+          runtimeError("Only instances have fields.");
+          return INTERPRET_RUNTIME_ERROR;
+        }
+
+        ObjInstance* instance = AS_INSTANCE(peek(1));
+        tableSet(&instance->fields, READ_STRING(), peek(0));
+
+        Value value = pop();
+        pop();
+        push(value);
+        break;
+      }
+
+      case OP_METHOD:
+        defineMethod(READ_STRING());
+        break;
 
       case OP_EQUAL: {
         Value b = pop();
@@ -429,12 +490,10 @@ static InterpretResult run(void) {
       case OP_ADD:
         if (IS_STRING(peek(0)) && IS_STRING(peek(1))) {
           concatenate();
-
         } else if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {
           double b = AS_NUMBER(pop());
           double a = AS_NUMBER(pop());
           push(NUMBER_VAL(a + b));
-
         } else {
           vm.ip = ip;
           runtimeError("Operands must be two numbers or two strings.");
@@ -481,11 +540,7 @@ static InterpretResult run(void) {
 
       case OP_JUMP_IF_FALSE: {
         uint16_t offset = READ_SHORT();
-
-        if (isFalsey(peek(0))) {
-          ip += offset;
-        }
-
+        if (isFalsey(peek(0))) ip += offset;
         break;
       }
 
@@ -515,6 +570,7 @@ static InterpretResult run(void) {
 #undef READ_BYTE
 #undef READ_SHORT
 #undef READ_CONSTANT
+#undef READ_STRING
 #undef READ_CONSTANT_LONG
 #undef BINARY_OP
 }
@@ -522,6 +578,5 @@ static InterpretResult run(void) {
 InterpretResult interpret(Chunk* chunk) {
   vm.chunk = chunk;
   vm.ip = vm.chunk->code;
-
   return run();
 }
