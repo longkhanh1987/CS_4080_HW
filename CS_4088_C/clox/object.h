@@ -88,6 +88,21 @@ typedef struct {
   int version;
 } ObjClass;
 
+#define SMALL_STRING_MAX 6
+
+typedef struct {
+  uint8_t length;
+  char chars[SMALL_STRING_MAX];
+} SmallString;
+
+// Example idea inside Value
+typedef union {
+  double number;
+  Obj* obj;
+  SmallString smallStr;
+} Value;
+
+
 #define OBJ_TYPE(value) (AS_OBJ(value)->type)
 #define IS_CLASS(value)    isObjType(value, OBJ_CLASS)
 #define IS_INSTANCE(value) isObjType(value, OBJ_INSTANCE)
